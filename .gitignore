@@ -1,0 +1,10 @@
+1.0.0/
+audio_segmentation_transcripts/
+fixations/
+sample_data/
+venv/
+aggregated_dicom_data.json
+aggregated_dicom_perceptual_error_info.json
+dicom_abnormality_transcript_timestamps.json
+HULA_egd_cxr.ipynb
+format.txt
