@@ -106,7 +106,7 @@ def create_class2_perceptual_error(csv_path: str, removed_sentence_indx: int, ab
 
     print(fixations_reduced_df['Time (in secs)', 'FPOGD'])
 
-    reduced_fixations_output_df = initial_fixations_df.with_columns(
+    reduced_fixations_final_output_df = initial_fixations_df.with_columns(
         pl.when((pl.col('Time (in secs)') >= removed_sentence_begin_time)
                 & (pl.col('Time (in secs)') <= removed_sentence_end_time))
         .then(fixation_reducer(pl.col('FPOGD')))
@@ -114,12 +114,12 @@ def create_class2_perceptual_error(csv_path: str, removed_sentence_indx: int, ab
         .alias('FPOGD')
     )
 
-    print(reduced_fixations_output_df.filter(
+    print(reduced_fixations_final_output_df.filter(
         (pl.col('Time (in secs)') >= removed_sentence_begin_time) &
         (pl.col('Time (in secs)') <= removed_sentence_end_time)
     )['Time (in secs)', 'FPOGD'])
 
-    return fixations_reduced_df, reduced_fixations_output_df
+    return fixations_reduced_df, reduced_fixations_final_output_df
 
 
 def create_both_class1_and_class2_perceptual_error(csv_path: str, abnormality_sentences_with_timestamps: list[dict], fixation_reducer):
@@ -294,6 +294,14 @@ def main():
 
             abnormality_sentences_with_timestamps = get_transcription_abnormality_sentences_with_timestamps(
                 transcript_path)
+
+            if len(abnormality_sentences_with_timestamps) == 0:
+                dicom_id_indx += 1
+                print("ABNORMALITY SENTECE NOT FOUND")
+                print(
+                    "================================================================================")
+                continue
+
             dicom_abnormality_transcript_timestamps[current_dicom_id
                                                     ] = abnormality_sentences_with_timestamps
             print(abnormality_sentences_with_timestamps)
