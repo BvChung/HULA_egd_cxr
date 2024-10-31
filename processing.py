@@ -312,7 +312,8 @@ def main():
                     f.write("INVALID TIMESTAMPS | Dicom Id: " +
                             current_dicom_id + '\n')
 
-                print("INVALID TIMESTAMP")
+                print("INVALID TIMESTAMPS | Dicom Id: " +
+                      current_dicom_id + '\n')
                 print(
                     "================================================================================")
                 continue
@@ -322,6 +323,11 @@ def main():
 
             if len(correct_abnormality_transcript) == 0:
                 dicom_id_indx += 1
+
+                with open(invalid_timestamps_file, 'a') as f:
+                    f.write("NO ABNORMALITY TRANSCRIPTION FOUND | Dicom Id: " +
+                            current_dicom_id + '\n')
+
                 print("NO ABNORMALITY TRANSCRIPTION FOUND | Dicom Id: " +
                       current_dicom_id + '\n')
                 print(
