@@ -5,11 +5,22 @@ import random
 from polars import DataFrame
 
 
+def contains_valid_timestamps(transcript):
+
+    for ts in transcript['time_stamped_text']:
+        num_periods = ts['phrase'].count('.')
+        if num_periods > 1:
+            return False
+
+    return True
+
+
 def label_sentences(sentences: list[str], timestamps: list[dict]):
     speaking_durations = []  # speaking_durations[i] corresponds to sentences[i]
 
     tsIndx = 0
     for s in sentences:
+
         begin_time = timestamps[tsIndx]['begin_time']
 
         while tsIndx < len(timestamps) and timestamps[tsIndx]['phrase'][-1] != ".":
@@ -18,18 +29,14 @@ def label_sentences(sentences: list[str], timestamps: list[dict]):
         if timestamps[tsIndx]['phrase'][-1] == ".":
             end_time = timestamps[tsIndx]['end_time']
             speaking_durations.append(
-                {'sentence': s, 'begin_time': begin_time, 'end_time': end_time,
-                    'duration': round(end_time - begin_time, 1)}
+                {'sentence': s, 'begin_time': begin_time, 'end_time': end_time}
             )
-
-        tsIndx += 1
+            tsIndx += 1
 
     return speaking_durations
 
 
-def get_transcription_abnormality_sentences_with_timestamps(file_path: str):
-    transcript_path = os.path.join(file_path, "transcript.json")
-    transcript = json.load(open(transcript_path))
+def label_abnormality_transcript_with_timestamps(transcript):
 
     timestamps = transcript['time_stamped_text']
     # remove leading and trailing white space
@@ -126,8 +133,6 @@ def create_both_class1_and_class2_perceptual_error(csv_path: str, abnormality_se
     """
     Missed abnormality due to removed transcription sentence and reduced fixation duration
     """
-    if len(abnormality_sentences_with_timestamps) == 1:
-        return {}
 
     c1_removed_sentence_indx = random.randint(
         0, len(abnormality_sentences_with_timestamps) - 1)
@@ -216,9 +221,9 @@ def main():
     Divide number of samples into 
     """
     perceptual_error_class_labels = {
-        1: 'Missed abnormality due to removed transcription sentence',
-        2: 'Missed abnormality due to reduced fixation duration',
-        3: 'Missed abnormality due to less experience'
+        1: 'Missed abnormality due to lack of fixation on region of interest',
+        2: 'Missed abnormality due to reduced fixation duration on region of interest',
+        3: 'Missed abnormality due to less experience in detecting abnormalities',
     }
 
     fixation_fpath = "fixations"
@@ -226,10 +231,8 @@ def main():
     dicom_ids = os.listdir(fixation_fpath)
 
     # key: dicom_id: {correct_data, incorrect_data_class_label...}
-    aggregated_dicom_data = {}
-    aggregated_dicom_perceptual_error_info = {}  # key: dicom_id: {error_info...}
-    # key: dicom_id: transcript_timestamps
-    dicom_abnormality_transcript_timestamps = {}
+    fixation_transcript_data = {}
+    fixation_transcript_metadata = {}  # key: dicom_id: {error_info...}
 
     """
     50 samples divided into 10 samples 
@@ -251,20 +254,23 @@ def main():
     subgroup_samples = []
     subgroup_labels = ['no_error', 'class1',
                        'class2', 'class1_and_2', 'class3']
-    for k, ratio in subgroup_ratios.items():
+    for ratio in subgroup_ratios.values():
         subgroup_samples.append(int(num_samples * ratio))
-
-    # subgroup_samples = [1]
-    # subgroup_labels = ['class1_and_2']
 
     curr_subgroup_indx = 0
     dicom_id_indx = 0
+
+    invalid_timestamps_file = "invalid_timestamps.txt"
+
+    with open(invalid_timestamps_file, 'w') as f:
+        pass
 
     for sg in subgroup_samples:
         if dicom_id_indx >= len(dicom_ids):
             break
 
-        for _ in range(sg):
+        sgIndx = 0
+        while sgIndx < sg:
             if dicom_id_indx >= len(dicom_ids):
                 break
 
@@ -274,160 +280,210 @@ def main():
             fixation_csv_path = os.path.join(
                 fixation_fpath, current_dicom_id)
 
-            curr_dicom_id_data = {
-                'correct_data': {},
-                'class_label_1_data': {},
-                'class_label_2_data': {},
-                'class_label_1_and_2_data': {},
-                'class_label_3_data': {},
-            }
-
-            curr_dicom_id_perceptual_error_details = {
-                'class_label_1': 0,
-                'class_label_2': 0,
-                'class_label_3': 0,
-                # [{'class_label_1': 0, 'class_label_2': 0, 'class_label_3': 0, 'phrase': "", 'begin_time': 0, 'end_time': 0}]
-                'phrases_removed': [],
-                'missed_fixation_points': {},
-                'fixation_points_reduced': {},
-            }
-
-            abnormality_sentences_with_timestamps = get_transcription_abnormality_sentences_with_timestamps(
-                transcript_path)
-
-            if len(abnormality_sentences_with_timestamps) == 0:
-                dicom_id_indx += 1
-                print("ABNORMALITY SENTECE NOT FOUND")
-                print(
-                    "================================================================================")
-                continue
-
-            dicom_abnormality_transcript_timestamps[current_dicom_id
-                                                    ] = abnormality_sentences_with_timestamps
-            print(abnormality_sentences_with_timestamps)
-
-            removed_sentence_indx = random.randint(
-                0, len(abnormality_sentences_with_timestamps) - 1)
-
-            print(
-                "================================================================================")
             print("Dicom Id:", current_dicom_id)
             print("Perceptual Error Class Label:",
                   subgroup_labels[curr_subgroup_indx])
 
-            correct_data_df = get_correct_data(fixation_csv_path)
-            curr_dicom_id_data['correct_data'] = convert_df_to_dict(
-                correct_data_df)
+            dicom_id_fixation_transcript_data = {
+                'correct_data': {},
+                'incorrect_data': {},
+            }
+
+            dicom_id_perceptual_error_metadata = {
+                'class_label_1': 0,
+                'class_label_2': 0,
+                'class_label_3': 0,
+                "class_label_1_description": perceptual_error_class_labels[1],
+                "class_label_2_description": perceptual_error_class_labels[2],
+                "class_label_3_description": perceptual_error_class_labels[3],
+                # [{'class_label_1': 0, 'class_label_2': 0, 'class_label_3': 0, 'phrase': "", 'begin_time': 0, 'end_time': 0}]
+                'phrases': [],
+                'missed_fixation_points': [],
+                'fixation_points_duration_reduced': [],
+            }
+
+            transcript = json.load(
+                open(os.path.join(transcript_path, "transcript.json")))
+
+            if not contains_valid_timestamps(transcript):
+                dicom_id_indx += 1
+
+                with open(invalid_timestamps_file, 'a') as f:
+                    f.write("INVALID TIMESTAMPS | Dicom Id: " +
+                            current_dicom_id + '\n')
+
+                print("INVALID TIMESTAMP")
+                print(
+                    "================================================================================")
+                continue
+
+            correct_abnormality_transcript = label_abnormality_transcript_with_timestamps(
+                transcript)
+
+            if len(correct_abnormality_transcript) == 0:
+                dicom_id_indx += 1
+                print("NO ABNORMALITY TRANSCRIPTION FOUND | Dicom Id: " +
+                      current_dicom_id + '\n')
+                print(
+                    "================================================================================")
+                continue
+
+            print(correct_abnormality_transcript)
+
+            removed_sentence_indx = random.randint(
+                0, len(correct_abnormality_transcript) - 1)
 
             if subgroup_labels[curr_subgroup_indx] == 'class1':
 
                 c1_missed_fixations_df, c1_remaining_fixations_output_df = create_class1_perceptual_error(
-                    fixation_csv_path, removed_sentence_indx, abnormality_sentences_with_timestamps)
-                c1_abnormality_removed_sentence_info = {
+                    fixation_csv_path, removed_sentence_indx, correct_abnormality_transcript)
+
+                c1_removed_sentence_metadata = {
                     'class_label_1': 1,
                     'class_label_2': 0,
                     'class_label_3': 0,
-                    'phrase': abnormality_sentences_with_timestamps[removed_sentence_indx]['sentence'],
-                    'begin_time': abnormality_sentences_with_timestamps[removed_sentence_indx]['begin_time'],
-                    'end_time': abnormality_sentences_with_timestamps[removed_sentence_indx]['end_time'],
+                    'class_label_description': perceptual_error_class_labels[1],
+                    'phrase': correct_abnormality_transcript[removed_sentence_indx]['sentence'],
+                    'begin_time': correct_abnormality_transcript[removed_sentence_indx]['begin_time'],
+                    'end_time': correct_abnormality_transcript[removed_sentence_indx]['end_time'],
                 }
 
-                curr_dicom_id_data['class_label_1_data'] = convert_df_to_dict(
+                dicom_id_fixation_transcript_data['incorrect_data'] = convert_df_to_dict(
                     c1_remaining_fixations_output_df)
-                curr_dicom_id_perceptual_error_details['class_label_1'] = 1
-                curr_dicom_id_perceptual_error_details['phrases_removed'].append(
-                    c1_abnormality_removed_sentence_info)
-                curr_dicom_id_perceptual_error_details['missed_fixation_points'] = convert_df_to_dict(
-                    c1_missed_fixations_df)
+
+                incorrect_abnormality_transcript = [tr for i, tr in enumerate(
+                    correct_abnormality_transcript) if i != removed_sentence_indx]
+                dicom_id_fixation_transcript_data['incorrect_data']['transcript'] = incorrect_abnormality_transcript
+
+                dicom_id_perceptual_error_metadata['class_label_1'] = 1
+                dicom_id_perceptual_error_metadata['phrases'].append(
+                    c1_removed_sentence_metadata)
+                dicom_id_perceptual_error_metadata['missed_fixation_points'].append(convert_df_to_dict(
+                    c1_missed_fixations_df))
             elif subgroup_labels[curr_subgroup_indx] == 'class2':
 
                 c2_reduced_fixations_df, c2_reduced_fixations_output_df = create_class2_perceptual_error(fixation_csv_path, removed_sentence_indx,
-                                                                                                         abnormality_sentences_with_timestamps, half_eye_gaze_fixation)
-                c2_abnormality_removed_sentence_info = {
+                                                                                                         correct_abnormality_transcript, half_eye_gaze_fixation)
+
+                dicom_id_fixation_transcript_data['incorrect_data'] = convert_df_to_dict(
+                    c2_reduced_fixations_output_df)
+
+                incorrect_abnormality_transcript = [tr for i, tr in enumerate(
+                    correct_abnormality_transcript) if i != removed_sentence_indx]
+                dicom_id_fixation_transcript_data['incorrect_data']['transcript'] = incorrect_abnormality_transcript
+
+                c2_removed_sentence_metadata = {
                     'class_label_1': 0,
                     'class_label_2': 1,
                     'class_label_3': 0,
-                    'phrase': abnormality_sentences_with_timestamps[removed_sentence_indx]['sentence'],
-                    'begin_time': abnormality_sentences_with_timestamps[removed_sentence_indx]['begin_time'],
-                    'end_time': abnormality_sentences_with_timestamps[removed_sentence_indx]['end_time'],
+                    'class_label_description': perceptual_error_class_labels[2],
+                    'phrase': correct_abnormality_transcript[removed_sentence_indx]['sentence'],
+                    'begin_time': correct_abnormality_transcript[removed_sentence_indx]['begin_time'],
+                    'end_time': correct_abnormality_transcript[removed_sentence_indx]['end_time'],
                 }
 
-                curr_dicom_id_data['class_label_2_data'] = convert_df_to_dict(
-                    c2_reduced_fixations_output_df)
-                curr_dicom_id_perceptual_error_details['class_label_2'] = 1
-                curr_dicom_id_perceptual_error_details['phrases_removed'].append(
-                    c2_abnormality_removed_sentence_info)
-                curr_dicom_id_perceptual_error_details['fixation_points_reduced'] = convert_df_to_dict(
-                    c2_reduced_fixations_df)
+                dicom_id_perceptual_error_metadata['class_label_2'] = 1
+                dicom_id_perceptual_error_metadata['phrases'].append(
+                    c2_removed_sentence_metadata)
+                dicom_id_perceptual_error_metadata['fixation_points_duration_reduced'].append(convert_df_to_dict(
+                    c2_reduced_fixations_df))
             elif subgroup_labels[curr_subgroup_indx] == 'class1_and_2':
+                if len(correct_abnormality_transcript) < 2:
+                    dicom_id_indx += 1
+                    print(
+                        "LESS THAN 2 ABNORMALITY TRANSCRIPTIONS FOR CLASS 1 AND 2 PERCEPTUAL ERROR")
+                    print(
+                        "================================================================================")
+                    continue
+
                 c1_removed_sentence_indx, c2_removed_sentence_indx, c1_c2_missed_fixations_df, c1_c2_remaining_fixations_df, c1_c2_fixations_reduced_df, c1_c2_final_fixations_output_df = create_both_class1_and_class2_perceptual_error(
-                    fixation_csv_path, abnormality_sentences_with_timestamps, half_eye_gaze_fixation)
-                curr_dicom_id_data['class_label_1_and_2_data'] = convert_df_to_dict(
+                    fixation_csv_path, correct_abnormality_transcript, half_eye_gaze_fixation)
+
+                dicom_id_fixation_transcript_data['incorrect_data'] = convert_df_to_dict(
                     c1_c2_final_fixations_output_df)
 
-                c1_abnormality_removed_sentence_info = {
+                incorrect_abnormality_transcript = [tr for i, tr in enumerate(
+                    correct_abnormality_transcript) if i != c1_removed_sentence_indx and i != c2_removed_sentence_indx]
+                dicom_id_fixation_transcript_data['incorrect_data']['transcript'] = incorrect_abnormality_transcript
+
+                c1_removed_sentence_metadata = {
                     'class_label_1': 1,
                     'class_label_2': 0,
                     'class_label_3': 0,
-                    'phrase': abnormality_sentences_with_timestamps[c1_removed_sentence_indx]['sentence'],
-                    'begin_time': abnormality_sentences_with_timestamps[c1_removed_sentence_indx]['begin_time'],
-                    'end_time': abnormality_sentences_with_timestamps[c1_removed_sentence_indx]['end_time'],
+                    'class_label_description': perceptual_error_class_labels[1],
+                    'phrase': correct_abnormality_transcript[c1_removed_sentence_indx]['sentence'],
+                    'begin_time': correct_abnormality_transcript[c1_removed_sentence_indx]['begin_time'],
+                    'end_time': correct_abnormality_transcript[c1_removed_sentence_indx]['end_time'],
                 }
-                c2_abnormality_removed_sentence_info = {
+                c2_removed_sentence_metadata = {
                     'class_label_1': 0,
                     'class_label_2': 1,
                     'class_label_3': 0,
-                    'phrase': abnormality_sentences_with_timestamps[c2_removed_sentence_indx]['sentence'],
-                    'begin_time': abnormality_sentences_with_timestamps[c2_removed_sentence_indx]['begin_time'],
-                    'end_time': abnormality_sentences_with_timestamps[c2_removed_sentence_indx]['end_time'],
+                    'class_label_description': perceptual_error_class_labels[2],
+                    'phrase': correct_abnormality_transcript[c2_removed_sentence_indx]['sentence'],
+                    'begin_time': correct_abnormality_transcript[c2_removed_sentence_indx]['begin_time'],
+                    'end_time': correct_abnormality_transcript[c2_removed_sentence_indx]['end_time'],
                 }
-                curr_dicom_id_perceptual_error_details['class_label_1'] = 1
-                curr_dicom_id_perceptual_error_details['class_label_2'] = 1
-                curr_dicom_id_perceptual_error_details['missed_fixation_points'] = convert_df_to_dict(
-                    c1_c2_missed_fixations_df)
-                curr_dicom_id_perceptual_error_details['fixation_points_reduced'] = convert_df_to_dict(
-                    c1_c2_fixations_reduced_df)
-                curr_dicom_id_perceptual_error_details['phrases_removed'].append(
-                    c1_abnormality_removed_sentence_info)
-                curr_dicom_id_perceptual_error_details['phrases_removed'].append(
-                    c2_abnormality_removed_sentence_info)
+
+                dicom_id_perceptual_error_metadata['class_label_1'] = 1
+                dicom_id_perceptual_error_metadata['class_label_2'] = 1
+                dicom_id_perceptual_error_metadata['missed_fixation_points'].append(convert_df_to_dict(
+                    c1_c2_missed_fixations_df))
+                dicom_id_perceptual_error_metadata['fixation_points_duration_reduced'].append(convert_df_to_dict(
+                    c1_c2_fixations_reduced_df))
+                dicom_id_perceptual_error_metadata['phrases'].append(
+                    c1_removed_sentence_metadata)
+                dicom_id_perceptual_error_metadata['phrases'].append(
+                    c2_removed_sentence_metadata)
             elif subgroup_labels[curr_subgroup_indx] == 'class3':
                 c3_fixations_df = create_class3_perceptual_error(
                     fixation_csv_path)
-                curr_dicom_id_data['class_label_3_data'] = convert_df_to_dict(
+
+                dicom_id_fixation_transcript_data['incorrect_data'] = convert_df_to_dict(
                     c3_fixations_df)
-                curr_dicom_id_perceptual_error_details['class_label_3'] = 1
-                c3_abnormality_removed_sentence_info = {
+
+                incorrect_abnormality_transcript = [tr for i, tr in enumerate(
+                    correct_abnormality_transcript) if i != removed_sentence_indx]
+                dicom_id_fixation_transcript_data['incorrect_data']['transcript'] = incorrect_abnormality_transcript
+
+                dicom_id_perceptual_error_metadata['class_label_3'] = 1
+                c3_removed_sentence_metadata = {
                     'class_label_1': 0,
                     'class_label_2': 0,
                     'class_label_3': 1,
-                    'phrase': abnormality_sentences_with_timestamps[removed_sentence_indx]['sentence'],
-                    'begin_time': abnormality_sentences_with_timestamps[removed_sentence_indx]['begin_time'],
-                    'end_time': abnormality_sentences_with_timestamps[removed_sentence_indx]['end_time'],
+                    'class_label_description': perceptual_error_class_labels[3],
+                    'phrase': correct_abnormality_transcript[removed_sentence_indx]['sentence'],
+                    'begin_time': correct_abnormality_transcript[removed_sentence_indx]['begin_time'],
+                    'end_time': correct_abnormality_transcript[removed_sentence_indx]['end_time'],
                 }
-                curr_dicom_id_perceptual_error_details['phrases_removed'].append(
-                    c3_abnormality_removed_sentence_info)
+                dicom_id_perceptual_error_metadata['phrases'].append(
+                    c3_removed_sentence_metadata)
 
-            aggregated_dicom_data[current_dicom_id] = curr_dicom_id_data
-            aggregated_dicom_perceptual_error_info[current_dicom_id
-                                                   ] = curr_dicom_id_perceptual_error_details
+            fixation_transcript_data[current_dicom_id] = dicom_id_fixation_transcript_data
+            fixation_transcript_metadata[current_dicom_id
+                                         ] = dicom_id_perceptual_error_metadata
+
+            correct_data_df = get_correct_data(fixation_csv_path)
+            dicom_id_fixation_transcript_data['correct_data'] = convert_df_to_dict(
+                correct_data_df)
+            dicom_id_fixation_transcript_data['correct_data']['transcript'] = correct_abnormality_transcript
 
             dicom_id_indx += 1
+            sgIndx += 1
             print(
                 "================================================================================")
 
         curr_subgroup_indx += 1
 
-    with open('aggregated_dicom_data.json', 'w') as json_file:
-        json_file.write(json.dumps(aggregated_dicom_data, indent=4))
+    with open('fixation_transcript_data.json', 'w') as json_file:
+        json_file.write(json.dumps(fixation_transcript_data, indent=4))
 
-    with open('aggregated_dicom_perceptual_error_info.json', 'w') as json_file:
+    with open('fixation_transcript_metadata.json', 'w') as json_file:
         json_file.write(json.dumps(
-            aggregated_dicom_perceptual_error_info, indent=4))
+            fixation_transcript_metadata, indent=4))
 
-    with open('dicom_abnormality_transcript_timestamps.json', 'w') as json_file:
-        json_file.write(json.dumps(
-            dicom_abnormality_transcript_timestamps, indent=4))
+    print(
+        f'Output Data Size: Fixation Transcript = {len(fixation_transcript_data)} | Metadata = {len(fixation_transcript_metadata)}')
 
 
 if __name__ == '__main__':
