@@ -3,6 +3,7 @@ import polars as pl
 import json
 import random
 from polars import DataFrame
+import time
 
 
 def contains_valid_timestamps(transcript):
@@ -220,6 +221,8 @@ def main():
     """
     Divide number of samples into 
     """
+    start_time = time.time()
+
     perceptual_error_class_labels = {
         1: 'Missed abnormality due to lack of fixation on region of interest',
         2: 'Missed abnormality due to reduced fixation duration on region of interest',
@@ -488,8 +491,10 @@ def main():
         json_file.write(json.dumps(
             fixation_transcript_metadata, indent=4))
 
+    end_time = time.time()
     print(
         f'Output Data Size: Fixation Transcript = {len(fixation_transcript_data)} | Metadata = {len(fixation_transcript_metadata)}')
+    print(f'Elapsed Time: {end_time - start_time} seconds')
 
 
 if __name__ == '__main__':
