@@ -8,6 +8,13 @@ import time
 
 def contains_valid_timestamps(transcript):
 
+    if len(transcript['time_stamped_text']) == 0:
+        return False
+
+    size = len(transcript['time_stamped_text'])
+    if transcript['time_stamped_text'][size - 1]['phrase'][-1] != ".":
+        transcript['time_stamped_text'][size - 1]['phrase'] += "."
+
     for ts in transcript['time_stamped_text']:
         num_periods = ts['phrase'].count('.')
         if num_periods > 1:
@@ -21,13 +28,15 @@ def label_sentences(sentences: list[str], timestamps: list[dict]):
 
     tsIndx = 0
     for s in sentences:
+        words = s.split(" ")
+        ending_word = words[-1]
 
         begin_time = timestamps[tsIndx]['begin_time']
 
-        while tsIndx < len(timestamps) and timestamps[tsIndx]['phrase'][-1] != ".":
+        while tsIndx < len(timestamps) and ending_word not in timestamps[tsIndx]['phrase']:
             tsIndx += 1
 
-        if timestamps[tsIndx]['phrase'][-1] == ".":
+        if ending_word in timestamps[tsIndx]['phrase']:
             end_time = timestamps[tsIndx]['end_time']
             speaking_durations.append(
                 {'sentence': s, 'begin_time': begin_time, 'end_time': end_time}
@@ -245,7 +254,7 @@ def main():
     4. Missed abnormality due to removed transcription sentence and reduced fixation duration
     5. No error
     """
-    num_samples = 50
+    num_samples = len(dicom_ids)
     subgroup_ratios = {
         'no_error_ratio': 0.2,
         'class1_ratio': 0.2,
@@ -257,6 +266,14 @@ def main():
     subgroup_samples = []
     subgroup_labels = ['no_error', 'class1',
                        'class2', 'class1_and_2', 'class3']
+    subgroup_label_count = {
+        'no_error': 0,
+        'class1': 0,
+        'class2': 0,
+        'class1_and_2': 0,
+        'class3': 0,
+    }
+
     for ratio in subgroup_ratios.values():
         subgroup_samples.append(int(num_samples * ratio))
 
@@ -264,7 +281,6 @@ def main():
     dicom_id_indx = 0
 
     invalid_timestamps_file = "invalid_timestamps.txt"
-
     with open(invalid_timestamps_file, 'w') as f:
         pass
 
@@ -277,6 +293,7 @@ def main():
             if dicom_id_indx >= len(dicom_ids):
                 break
 
+            current_class_label = subgroup_labels[curr_subgroup_indx]
             current_dicom_id = dicom_ids[dicom_id_indx]
             transcript_path = os.path.join(
                 audio_seg_transcript_fpath, current_dicom_id)
@@ -285,7 +302,7 @@ def main():
 
             print("Dicom Id:", current_dicom_id)
             print("Perceptual Error Class Label:",
-                  subgroup_labels[curr_subgroup_indx])
+                  current_class_label)
 
             dicom_id_fixation_transcript_data = {
                 'correct_data': {},
@@ -342,7 +359,7 @@ def main():
             removed_sentence_indx = random.randint(
                 0, len(correct_abnormality_transcript) - 1)
 
-            if subgroup_labels[curr_subgroup_indx] == 'class1':
+            if current_class_label == 'class1':
 
                 c1_missed_fixations_df, c1_remaining_fixations_output_df = create_class1_perceptual_error(
                     fixation_csv_path, removed_sentence_indx, correct_abnormality_transcript)
@@ -369,7 +386,7 @@ def main():
                     c1_removed_sentence_metadata)
                 dicom_id_perceptual_error_metadata['missed_fixation_points'].append(convert_df_to_dict(
                     c1_missed_fixations_df))
-            elif subgroup_labels[curr_subgroup_indx] == 'class2':
+            elif current_class_label == 'class2':
 
                 c2_reduced_fixations_df, c2_reduced_fixations_output_df = create_class2_perceptual_error(fixation_csv_path, removed_sentence_indx,
                                                                                                          correct_abnormality_transcript, half_eye_gaze_fixation)
@@ -396,7 +413,7 @@ def main():
                     c2_removed_sentence_metadata)
                 dicom_id_perceptual_error_metadata['fixation_points_duration_reduced'].append(convert_df_to_dict(
                     c2_reduced_fixations_df))
-            elif subgroup_labels[curr_subgroup_indx] == 'class1_and_2':
+            elif current_class_label == 'class1_and_2':
                 if len(correct_abnormality_transcript) < 2:
                     dicom_id_indx += 1
                     print(
@@ -444,7 +461,7 @@ def main():
                     c1_removed_sentence_metadata)
                 dicom_id_perceptual_error_metadata['phrases'].append(
                     c2_removed_sentence_metadata)
-            elif subgroup_labels[curr_subgroup_indx] == 'class3':
+            elif current_class_label == 'class3':
                 c3_fixations_df = create_class3_perceptual_error(
                     fixation_csv_path)
 
@@ -479,6 +496,7 @@ def main():
 
             dicom_id_indx += 1
             sgIndx += 1
+            subgroup_label_count[current_class_label] += 1
             print(
                 "================================================================================")
 
@@ -494,6 +512,7 @@ def main():
     end_time = time.time()
     print(
         f'Output Data Size: Fixation Transcript = {len(fixation_transcript_data)} | Metadata = {len(fixation_transcript_metadata)}')
+    print(subgroup_label_count)
     print(f'Elapsed Time: {end_time - start_time} seconds')
 
 

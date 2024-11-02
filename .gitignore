@@ -13,3 +13,6 @@ ex/
 fixation_transcript_data.json
 fixation_transcript_metadata.json
 invalid_timestamps.txt
+all_perceptual_error_generated_data.json
+reflax
+Baselines.ipynb
